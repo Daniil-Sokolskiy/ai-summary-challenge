@@ -1,0 +1,70 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: app
+      POSTGRES_DB: registry
+    ports:
+      - '5434:5432'
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U app -d registry']
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - '6380:6379'
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+  llm-mock:
+    build: ./llm-mock
+    ports:
+      - '8090:8090'
+    environment:
+      # Задержка одного вызова LLM, секунды (равномерно из диапазона).
+      LLM_LATENCY_MIN: '7.0'
+      LLM_LATENCY_MAX: '9.0'
+      # Free-tier: лимит на весь аккаунт, не на ключ и не на IP.
+      LLM_RATE_LIMIT_PER_MIN: '16'
+    healthcheck:
+      test: ['CMD', 'python', '-c', "import urllib.request;urllib.request.urlopen('http://localhost:8090/health')"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  api:
+    build: ./backend
+    ports:
+      - '8000:8000'
+    environment:
+      DATABASE_URL: postgresql+asyncpg://app:app@db:5432/registry
+      REDIS_URL: redis://redis:6379/0
+      LLM_BASE_URL: http://llm-mock:8090/v1
+      LLM_API_KEY: mock-key
+      LLM_MODEL: fast-model-free
+      LLM_MODEL_FALLBACK: fast-model-paid
+      LOG_SQL: 'true'
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      llm-mock:
+        condition: service_healthy
+
+  web:
+    build: ./frontend
+    ports:
+      - '3000:3000'
+    environment:
+      BACKEND_URL: http://api:8000
+      NEXT_PUBLIC_API_URL: /api
+    depends_on:
+      - api
