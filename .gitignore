@@ -14,3 +14,6 @@ venv/
 .mypy_cache/
 .ruff_cache/
 coverage/
+
+# ключ проверки — только локально
+GRADING.local.md
